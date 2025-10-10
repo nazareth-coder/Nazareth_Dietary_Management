@@ -10,6 +10,7 @@ from constants import *
 from extractor import open_extractor_window
 from db_utils import DatabaseError
 from excel_utils import ExcelFileOpenError
+from typing import Optional
 
 class InventoryApp:
     def __init__(self, root):
@@ -31,6 +32,10 @@ class InventoryApp:
         self.create_widgets()
         self.load_data()
         self.refresh_table()
+        # Auto-backup scheduling
+        self._auto_backup_after_id: Optional[str] = None
+        if self.settings.get('auto_backup_enabled', False):
+            self._schedule_next_backup()
 
     def create_widgets(self):
         style = ttk.Style()
@@ -178,6 +183,23 @@ class InventoryApp:
             command=self.on_auto_summary_toggle
         )
         self.auto_summary_chk.grid(row=0, column=5, padx=(12, 0))
+
+        # Backup controls
+        ttk.Button(btn_frame, text='Backup Now', command=self.backup_now).grid(row=0, column=6, padx=(12, 3))
+        self.auto_backup_var = BooleanVar(value=bool(self.settings.get('auto_backup_enabled', False)))
+        self.auto_backup_chk = ttk.Checkbutton(
+            btn_frame,
+            text='Auto-backup',
+            variable=self.auto_backup_var,
+            command=self.on_auto_backup_toggle
+        )
+        self.auto_backup_chk.grid(row=0, column=7, padx=(6, 3))
+        # Interval
+        ttk.Label(btn_frame, text='every (min):').grid(row=0, column=8, padx=(6, 3))
+        self.backup_interval_var = StringVar(value=str(self.settings.get('backup_interval_minutes', 60)))
+        self.backup_interval_entry = ttk.Entry(btn_frame, textvariable=self.backup_interval_var, width=5)
+        self.backup_interval_entry.grid(row=0, column=9, padx=(0, 3))
+        self.backup_interval_entry.bind('<FocusOut>', lambda e: self.on_backup_interval_change())
 
         # Add Summary Table button
         self.summary_button = ttk.Button(self.root, text="Add Summary Table", command=self.add_summary_table)
@@ -449,6 +471,17 @@ class InventoryApp:
         data = dict(self.settings)
         # Ensure current auto summary value is stored
         data['auto_summary'] = bool(self.auto_summary_var.get()) if hasattr(self, 'auto_summary_var') else data.get('auto_summary', True)
+        # Backup settings
+        if hasattr(self, 'auto_backup_var'):
+            data['auto_backup_enabled'] = bool(self.auto_backup_var.get())
+        if hasattr(self, 'backup_interval_var'):
+            try:
+                data['backup_interval_minutes'] = max(1, int(self.backup_interval_var.get()))
+            except Exception:
+                data['backup_interval_minutes'] = data.get('backup_interval_minutes', 60)
+        # Default backup dir inside settings dir if not set
+        if not data.get('backup_dir'):
+            data['backup_dir'] = os.path.join(self.settings_dir, 'backups')
         try:
             with open(self.settings_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -461,13 +494,79 @@ class InventoryApp:
         self.settings['auto_summary'] = bool(self.auto_summary_var.get())
         self.save_settings()
 
+    def backup_now(self):
+        try:
+            from backup_utils import backup_all
+            backup_dir = self.settings.get('backup_dir') or os.path.join(self.settings_dir, 'backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            results = backup_all(backup_dir, with_excel=True)
+            msg = "Backup created:\n"
+            if 'sql' in results:
+                msg += f"- SQL: {results['sql']}\n"
+            if 'excel' in results:
+                msg += f"- Excel: {results['excel']}\n"
+            messagebox.showinfo('Backup', msg.rstrip())
+        except DatabaseError as e:
+            messagebox.showerror('Database Error', f'Backup failed due to database error:\n{e}')
+        except Exception as e:
+            messagebox.showerror('Backup Error', f'Unexpected error during backup:\n{e}')
+
+    def on_auto_backup_toggle(self):
+        enabled = bool(self.auto_backup_var.get())
+        self.settings['auto_backup_enabled'] = enabled
+        self.save_settings()
+        # Cancel any existing schedule
+        if self._auto_backup_after_id is not None:
+            try:
+                self.root.after_cancel(self._auto_backup_after_id)
+            except Exception:
+                pass
+            self._auto_backup_after_id = None
+        if enabled:
+            self._schedule_next_backup()
+
+    def on_backup_interval_change(self):
+        try:
+            minutes = max(1, int(self.backup_interval_var.get()))
+        except Exception:
+            minutes = 60
+        self.settings['backup_interval_minutes'] = minutes
+        self.save_settings()
+        if self.auto_backup_var.get():
+            # reschedule
+            if self._auto_backup_after_id is not None:
+                try:
+                    self.root.after_cancel(self._auto_backup_after_id)
+                except Exception:
+                    pass
+                self._auto_backup_after_id = None
+            self._schedule_next_backup()
+
+    def _schedule_next_backup(self):
+        minutes = int(self.settings.get('backup_interval_minutes', 60))
+        delay_ms = max(1, minutes) * 60 * 1000
+        # Schedule
+        self._auto_backup_after_id = self.root.after(delay_ms, self._run_auto_backup_tick)
+
+    def _run_auto_backup_tick(self):
+        # Perform backup quietly; surface errors
+        try:
+            from backup_utils import backup_all
+            backup_dir = self.settings.get('backup_dir') or os.path.join(self.settings_dir, 'backups')
+            os.makedirs(backup_dir, exist_ok=True)
+            backup_all(backup_dir, with_excel=True)
+        except Exception as e:
+            # Non-fatal: show a brief warning
+            try:
+                messagebox.showwarning('Auto-backup', f'Auto-backup encountered an error:\n{e}')
+            except Exception:
+                pass
+        finally:
+            # Schedule next run if still enabled
+            if self.settings.get('auto_backup_enabled', False):
+                self._schedule_next_backup()
+
     def _get_user_config_dir(self, app_name: str) -> str:
-        """Return a user-writable config directory per platform.
-        Linux: ~/.config/<app_name>
-        Windows: %APPDATA%\\<app_name>
-        macOS: ~/Library/Application Support/<app_name>
-        Fallback: user's home/<app_name>
-        """
         system = platform.system()
         home = os.path.expanduser('~')
         if system == 'Windows':

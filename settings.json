@@ -1,3 +1,10 @@
 {
-  "auto_summary": true
+  "auto_summary": false,
+  "db_config": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "diet_app",
+    "password": "Hakdog123!",
+    "database": "dietary_mgmt"
+  }
 }

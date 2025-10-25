@@ -15,7 +15,7 @@ DEFAULT_DB_CONFIG = {
     "host": "127.0.0.1",
     "port": 3306,
     "user": "root",
-    "password": "",
+    "password": "Hakdog123!",
     "database": "dietary_mgmt",
 }
 
@@ -25,23 +25,33 @@ class DatabaseError(Exception):
 
 
 def _load_db_config() -> dict:
-    # Try project-level settings.json
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    settings_path = os.path.join(base_dir, 'settings.json')
+    # Start with default config
     cfg = dict(DEFAULT_DB_CONFIG)
+    
+    # Try project-level settings.json
     try:
-        with open(settings_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if isinstance(data, dict) and isinstance(data.get('db'), dict):
-                cfg.update(data['db'])
-    except Exception:
-        pass
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        settings_path = os.path.join(base_dir, 'settings.json')
+        
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Check for db_config in settings
+                if isinstance(data, dict) and 'db_config' in data and isinstance(data['db_config'], dict):
+                    cfg.update(data['db_config'])
+                # For backward compatibility with old settings format
+                elif isinstance(data, dict) and 'db' in data and isinstance(data['db'], dict):
+                    cfg.update(data['db'])
+    except Exception as e:
+        print(f"Warning: Could not load settings from settings.json: {e}")
+    
     # Environment overrides
     cfg['host'] = os.environ.get('DMS_DB_HOST', cfg['host'])
     cfg['port'] = int(os.environ.get('DMS_DB_PORT', cfg['port']))
     cfg['user'] = os.environ.get('DMS_DB_USER', cfg['user'])
     cfg['password'] = os.environ.get('DMS_DB_PASSWORD', cfg['password'])
     cfg['database'] = os.environ.get('DMS_DB_NAME', cfg['database'])
+    
     return cfg
 
 

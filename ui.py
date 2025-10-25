@@ -29,6 +29,11 @@ class InventoryApp:
             pass
         self.settings_path = os.path.join(self.settings_dir, 'settings.json')
         self.settings = self.load_settings()
+        # Apply saved theme early if running under ttkbootstrap Window
+        try:
+            self._apply_theme(self.settings.get('theme'))
+        except Exception:
+            pass
         self.create_widgets()
         self.load_data()
         self.refresh_table()
@@ -36,40 +41,77 @@ class InventoryApp:
         self._auto_backup_after_id: Optional[str] = None
         if self.settings.get('auto_backup_enabled', False):
             self._schedule_next_backup()
+            
+        # Clean up old settings if they exist
+        if 'auto_summary' in self.settings:
+            del self.settings['auto_summary']
+            self.save_settings()
 
     def create_widgets(self):
         style = ttk.Style()
-        style.theme_use('clam')
+        # Use the active theme (ttkbootstrap sets this); don't override here
         style.configure('Treeview', font=('Segoe UI', 10), rowheight=24)
         style.configure('Treeview.Heading', font=('Segoe UI', 11, 'bold'))
         style.configure('TButton', font=('Segoe UI', 10), padding=6)
         style.configure('TLabel', font=('Segoe UI', 10))
         style.configure('TEntry', font=('Segoe UI', 10))
 
+        # --- Scrollable container for the whole page ---
+        container = ttk.Frame(self.root)
+        container.pack(fill=BOTH, expand=True)
+        canvas = Canvas(container, highlightthickness=0)
+        vscroll = ttk.Scrollbar(container, orient=VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=vscroll.set)
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        vscroll.pack(side=RIGHT, fill=Y)
+        # Inner content frame that will scroll
+        self.content = ttk.Frame(canvas)
+        content_window = canvas.create_window((0, 0), window=self.content, anchor='nw')
+
+        def _on_content_configure(event):
+            try:
+                canvas.configure(scrollregion=canvas.bbox('all'))
+            except Exception:
+                pass
+        self.content.bind('<Configure>', _on_content_configure)
+
+        def _on_canvas_configure(event):
+            try:
+                # Make content frame width track the canvas width
+                canvas.itemconfigure(content_window, width=event.width)
+            except Exception:
+                pass
+        canvas.bind('<Configure>', _on_canvas_configure)
+
+        # Optional: mouse wheel support (Windows)
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        try:
+            canvas.bind_all('<MouseWheel>', _on_mousewheel)
+        except Exception:
+            pass
+
         # Title
-        title = ttk.Label(self.root, text='Dietary Management System', font=('Segoe UI', 18, 'bold'), background='#f4f6fa', foreground='#333')
+        title = ttk.Label(self.content, text='Dietary Management System', font=('Segoe UI', 18, 'bold'))
         title.pack(pady=(10, 0))
         
         # Footer with copyright
-        footer_frame = ttk.Frame(self.root, style='Footer.TFrame')
+        footer_frame = ttk.Frame(self.content)
         footer_frame.pack(side=BOTTOM, fill=X, pady=(0, 0))
         
         current_year = datetime.now().year
         footer_label = ttk.Label(
             footer_frame, 
-            text=f'© {current_year} Daito.dev. All rights reserved.',
+            text=f' Daito.dev. All rights reserved.',
             font=('Segoe UI', 8, 'italic'),
-            foreground='#666666',
-            background='#f4f6fa',
-            padding=(0, 2, 0, 2)  # Reduced vertical padding
+            padding=(0, 2, 0, 2)
         )
         footer_label.pack()
         
-        # Configure footer style
-        style.configure('Footer.TFrame', background='#f4f6fa')
+        # Footer style inherits from theme; no explicit colors to respect dark mode
 
         # Entry fields (auto-generated for all columns)
-        frame = ttk.Frame(self.root, padding=10)
+        frame = ttk.Frame(self.content, padding=10)
         frame.pack(padx=10, pady=10)
 
         # Widget references for all fields
@@ -128,7 +170,8 @@ class InventoryApp:
             elif colname == 'RND Dietary Management':
                 widget = ttk.Combobox(frame, values=RND_DIETARY_MANAGEMENT_OPTIONS, width=30)
             elif colname == 'Diet Prescriptions(Current)':
-                widget = ttk.Entry(frame, width=30)
+                # Handled below as a multi-line Text field; skip placing in the grid
+                continue
             elif colname == 'With Documents':
                 widget = ttk.Combobox(frame, values=WITH_DOCUMENTS_OPTIONS, width=10)
             elif colname == 'Given NCP':
@@ -163,8 +206,20 @@ class InventoryApp:
         for i in range(max_fields_per_row*2):
             frame.grid_columnconfigure(i, weight=1)
 
+        # Long text field below the grid: Diet Prescriptions(Current)
+        long_frame = ttk.Frame(self.content, padding=(10, 0, 10, 0))
+        long_frame.pack(padx=10, pady=(0, 10))
+        ttk.Label(long_frame, text='Diet Prescriptions(Current)').grid(row=0, column=0, sticky=W)
+        dp_text = Text(long_frame, height=4, width=100, wrap='word')
+        dp_scroll = ttk.Scrollbar(long_frame, orient=VERTICAL, command=dp_text.yview)
+        dp_text.configure(yscrollcommand=dp_scroll.set)
+        dp_text.grid(row=1, column=0, sticky='nw', pady=(4, 0))
+        dp_scroll.grid(row=1, column=1, sticky='ns', pady=(4, 0))
+        long_frame.grid_columnconfigure(0, weight=0)
+        self.entries['Diet Prescriptions(Current)'] = dp_text
+
         # Buttons
-        btn_frame = ttk.Frame(self.root)
+        btn_frame = ttk.Frame(self.content)
         btn_frame.pack(pady=5)
         self.add_button = ttk.Button(btn_frame, text='Add Patient', command=self.add_item)
         self.add_button.grid(row=0, column=0, padx=3)
@@ -172,17 +227,6 @@ class InventoryApp:
         ttk.Button(btn_frame, text='Delete Patient', command=self.delete_item).grid(row=0, column=2, padx=3)
         ttk.Button(btn_frame, text='Open Extractor', command=self.open_extractor).grid(row=0, column=3, padx=3)
         ttk.Button(btn_frame, text='Export to Excel', command=self.export_excel).grid(row=0, column=4, padx=3)
-
-        # Auto-update summary toggle (persisted)
-        default_auto = True if not isinstance(self.settings.get('auto_summary'), bool) else self.settings.get('auto_summary')
-        self.auto_summary_var = BooleanVar(value=default_auto)
-        self.auto_summary_chk = ttk.Checkbutton(
-            btn_frame,
-            text='Auto-update summary',
-            variable=self.auto_summary_var,
-            command=self.on_auto_summary_toggle
-        )
-        self.auto_summary_chk.grid(row=0, column=5, padx=(12, 0))
 
         # Backup controls
         ttk.Button(btn_frame, text='Backup Now', command=self.backup_now).grid(row=0, column=6, padx=(12, 3))
@@ -200,13 +244,14 @@ class InventoryApp:
         self.backup_interval_entry = ttk.Entry(btn_frame, textvariable=self.backup_interval_var, width=5)
         self.backup_interval_entry.grid(row=0, column=9, padx=(0, 3))
         self.backup_interval_entry.bind('<FocusOut>', lambda e: self.on_backup_interval_change())
-
-        # Add Summary Table button
-        self.summary_button = ttk.Button(self.root, text="Add Summary Table", command=self.add_summary_table)
-        self.summary_button.pack(pady=(10, 0))
+        self.backup_interval_entry.bind('<Return>', self.on_backup_interval_enter)
+        # Refresh button to reload data and update table
+        ttk.Button(btn_frame, text='Refresh', command=self.refresh_now).grid(row=0, column=10, padx=(6, 3))
+        # Settings button (theme selector, etc.)
+        ttk.Button(btn_frame, text='Settings', command=self.open_settings).grid(row=0, column=11, padx=(6, 3))
 
         # Search bar (filters table)
-        search_frame = ttk.Frame(self.root)
+        search_frame = ttk.Frame(self.content)
         search_frame.pack(padx=10, pady=(6, 0), fill=X)
         ttk.Label(search_frame, text='Search:').pack(side=LEFT)
         self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
@@ -216,27 +261,62 @@ class InventoryApp:
         self.search_entry.bind('<KeyRelease>', self.on_search)
 
         # Table (single instance)
-        table_frame = ttk.Frame(self.root)
+        table_frame = ttk.Frame(self.content)
         table_frame.pack(padx=10, pady=10, fill=BOTH, expand=True)
 
-        self.tree = ttk.Treeview(table_frame, columns=COLUMNS, show='headings', style='Treeview')
+        # Configure treeview with better spacing
+        style = ttk.Style()
+        style.configure('Treeview', rowheight=28)  # Increased row height
+        style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
+        
+        # Create treeview with horizontal scrollbar
+        self.tree = ttk.Treeview(
+            table_frame, 
+            columns=COLUMNS, 
+            show='headings', 
+            style='Treeview',
+            selectmode='browse',
+            height=20  # Show 20 rows by default
+        )
+        
+        # Configure column widths based on content
+        col_widths = {
+            'Patient ID': 100,
+            'Last Name': 120,
+            'First Name': 120,
+            'Middle Name': 120,
+            'Age': 60,
+            'Sex': 80,
+            'Room': 80,
+            'Diet Type': 150,
+            'Allergies': 200,
+            'Diet Prescriptions': 250,
+            'Notes': 300,
+            'Last Updated': 150
+        }
+        
+        # Set up columns with appropriate widths
         for col in COLUMNS:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=120, anchor=W)
-        self.tree.grid(row=0, column=0, sticky='nsew')
+            width = col_widths.get(col, 120)  # Default width 120 if not specified
+            self.tree.heading(col, text=col, anchor=W)
+            self.tree.column(col, width=width, minwidth=80, stretch=NO, anchor=W)
+        
         # Bind selection event to input population
         self.tree.bind('<<TreeviewSelect>>', self.on_row_select)
 
         # Scrollbars for the table
         vscrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.tree.yview)
         hscrollbar = ttk.Scrollbar(table_frame, orient=HORIZONTAL, command=self.tree.xview)
-        self.tree.configure(yscroll=vscrollbar.set, xscroll=hscrollbar.set)
+        self.tree.configure(yscrollcommand=vscrollbar.set, xscrollcommand=hscrollbar.set)
+        
+        # Grid layout with proper expansion
+        self.tree.grid(row=0, column=0, sticky='nsew')
         vscrollbar.grid(row=0, column=1, sticky='ns')
         hscrollbar.grid(row=1, column=0, sticky='ew')
-
+        
+        # Configure grid weights for proper resizing
         table_frame.grid_rowconfigure(0, weight=1)
-        table_frame.grid_columnconfigure(0, weight=1)   
-
+        table_frame.grid_columnconfigure(0, weight=1)
 
     def on_row_select(self, event):
         selected = self.tree.focus()
@@ -267,6 +347,9 @@ class InventoryApp:
                         day_cb.set('')
                 elif isinstance(widget, ttk.Combobox):
                     widget.set(value)
+                elif isinstance(widget, Text):
+                    widget.delete('1.0', END)
+                    widget.insert('1.0', value)
                 else:
                     widget.delete(0, END)
                     widget.insert(0, value)
@@ -296,7 +379,11 @@ class InventoryApp:
                 val = f"{y}-{m}-{d}" if y and m and d else ''
                 item.append(val)
             else:
-                val = self.entries[col].get()
+                w = self.entries[col]
+                if isinstance(w, Text):
+                    val = w.get('1.0', 'end-1c')
+                else:
+                    val = w.get()
                 item.append(val)
         if not all(item[1:6]):
             messagebox.showerror('Error', 'All fields except Patient ID and Last Updated are required.')
@@ -328,6 +415,8 @@ class InventoryApp:
                 day_cb.set('')
             elif isinstance(widget, ttk.Combobox):
                 widget.set('')
+            elif isinstance(widget, Text):
+                widget.delete('1.0', END)
             else:
                 widget.delete(0, END)
         # Re-enable Add button when fields are cleared
@@ -350,15 +439,6 @@ class InventoryApp:
         except DatabaseError as e:
             messagebox.showerror('Database Error', str(e))
             return
-        # Optionally regenerate summary tables
-        if getattr(self, 'auto_summary_var', None) and self.auto_summary_var.get():
-            try:
-                from excel_utils import add_summary_table_to_all_sheets
-                add_summary_table_to_all_sheets()
-            except ExcelFileOpenError as e:
-                messagebox.showwarning('Summary Not Updated', f'Summary was not updated because the Excel file is open:\n{e}')
-            except Exception as e:
-                messagebox.showwarning('Summary Not Updated', f'Unexpected error while updating summary:\n{e}')
         self.load_data()
         self.refresh_table()
         self.clear_fields()
@@ -389,21 +469,17 @@ class InventoryApp:
                 d = day_cb.get()
                 updated_item.append(f"{y}-{m}-{d}" if y and m and d else '')
             else:
-                updated_item.append(self.entries[col].get())
+                w = self.entries[col]
+                if isinstance(w, Text):
+                    updated_item.append(w.get('1.0', 'end-1c'))
+                else:
+                    updated_item.append(w.get())
         try:
             update_patient(item_id, updated_item)
         except DatabaseError as e:
             messagebox.showerror('Database Error', str(e))
             return
-        # Optionally regenerate summary tables
-        if getattr(self, 'auto_summary_var', None) and self.auto_summary_var.get():
-            try:
-                from excel_utils import add_summary_table_to_all_sheets
-                add_summary_table_to_all_sheets()
-            except ExcelFileOpenError as e:
-                messagebox.showwarning('Summary Not Updated', f'Summary was not updated because the Excel file is open:\n{e}')
-            except Exception as e:
-                messagebox.showwarning('Summary Not Updated', f'Unexpected error while updating summary:\n{e}')
+        # Summary tables are now handled by export functionality
         self.load_data()
         self.refresh_table()
         self.clear_fields()  # Clear fields after update
@@ -446,6 +522,11 @@ class InventoryApp:
         self.search_var.set('')
         self.refresh_table()
 
+    def refresh_now(self):
+        # Reload data from source and refresh the table view
+        self.load_data()
+        self.refresh_table()
+
     # --- Settings persistence ---
     def load_settings(self):
         # Try preferred location
@@ -482,6 +563,9 @@ class InventoryApp:
         # Default backup dir inside settings dir if not set
         if not data.get('backup_dir'):
             data['backup_dir'] = os.path.join(self.settings_dir, 'backups')
+        # Persist theme if present
+        if 'theme' in self.settings and self.settings.get('theme'):
+            data['theme'] = self.settings.get('theme')
         try:
             with open(self.settings_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
@@ -489,17 +573,79 @@ class InventoryApp:
             # Non-fatal; ignore write errors
             pass
 
-    def on_auto_summary_toggle(self):
-        # Update settings and persist
-        self.settings['auto_summary'] = bool(self.auto_summary_var.get())
-        self.save_settings()
+    # --- Theme management ---
+    def _apply_theme(self, theme_name: Optional[str]):
+        if not theme_name:
+            return
+        try:
+            # ttkbootstrap Window exposes .style with theme_use
+            current = self.root.style.theme_use()
+            if current != theme_name:
+                # Ensure the theme exists; fallback if not
+                available = set(self.root.style.theme_names())
+                if theme_name in available:
+                    self.root.style.theme_use(theme_name)
+                else:
+                    # Fallback to a safe default if requested theme missing
+                    self.root.style.theme_use('darkly' if 'darkly' in available else current)
+        except Exception:
+            # If not a ttkbootstrap Window, ignore
+            pass
+
+    def open_settings(self):
+        top = Toplevel(self.root)
+        top.title('Settings')
+        top.transient(self.root)
+        top.resizable(False, False)
+        # Make modal and center over parent
+        try:
+            top.update_idletasks()
+            parent_x = self.root.winfo_rootx()
+            parent_y = self.root.winfo_rooty()
+            parent_w = self.root.winfo_width()
+            parent_h = self.root.winfo_height()
+            win_w = top.winfo_width()
+            win_h = top.winfo_height()
+            if win_w <= 1 or win_h <= 1:
+                # Toplevel may not be laid out yet; assume a reasonable default size
+                win_w, win_h = 360, 140
+            x = parent_x + max(0, (parent_w - win_w) // 2)
+            y = parent_y + max(0, (parent_h - win_h) // 2)
+            top.geometry(f"+{x}+{y}")
+            top.grab_set()
+            top.focus_set()
+        except Exception:
+            pass
+        pad = {'padx': 10, 'pady': 8}
+
+        ttk.Label(top, text='Theme').grid(row=0, column=0, sticky='w', **pad)
+        # Get available themes from current style
+        try:
+            themes = list(self.root.style.theme_names())
+        except Exception:
+            themes = []
+        self.theme_var = StringVar(value=self.settings.get('theme') or (self.root.style.theme_use() if hasattr(self.root, 'style') else ''))
+        theme_cb = ttk.Combobox(top, values=themes, textvariable=self.theme_var, state='readonly', width=18)
+        theme_cb.grid(row=0, column=1, sticky='w', **pad)
+
+        btns = ttk.Frame(top)
+        btns.grid(row=1, column=0, columnspan=2, sticky='e', padx=10, pady=(0,10))
+        ttk.Button(btns, text='Apply', command=lambda: self._on_theme_apply(top)).grid(row=0, column=0, padx=(0,6))
+        ttk.Button(btns, text='Close', command=top.destroy).grid(row=0, column=1)
+
+    def _on_theme_apply(self, dialog):
+        theme = self.theme_var.get().strip()
+        if theme:
+            self.settings['theme'] = theme
+            self._apply_theme(theme)
+            self.save_settings()
 
     def backup_now(self):
         try:
             from backup_utils import backup_all
             backup_dir = self.settings.get('backup_dir') or os.path.join(self.settings_dir, 'backups')
             os.makedirs(backup_dir, exist_ok=True)
-            results = backup_all(backup_dir, with_excel=True)
+            results = backup_all(backup_dir, with_excel=False)
             msg = "Backup created:\n"
             if 'sql' in results:
                 msg += f"- SQL: {results['sql']}\n"
@@ -542,6 +688,18 @@ class InventoryApp:
                 self._auto_backup_after_id = None
             self._schedule_next_backup()
 
+    def on_backup_interval_enter(self, event=None):
+        # Reuse existing change logic, then inform the user
+        self.on_backup_interval_change()
+        try:
+            minutes = int(self.settings.get('backup_interval_minutes', 60))
+        except Exception:
+            minutes = 60
+        try:
+            messagebox.showinfo('Auto-backup', f'Backup interval updated to {minutes} minute(s).')
+        except Exception:
+            pass
+
     def _schedule_next_backup(self):
         minutes = int(self.settings.get('backup_interval_minutes', 60))
         delay_ms = max(1, minutes) * 60 * 1000
@@ -554,7 +712,7 @@ class InventoryApp:
             from backup_utils import backup_all
             backup_dir = self.settings.get('backup_dir') or os.path.join(self.settings_dir, 'backups')
             os.makedirs(backup_dir, exist_ok=True)
-            backup_all(backup_dir, with_excel=True)
+            backup_all(backup_dir, with_excel=False)
         except Exception as e:
             # Non-fatal: show a brief warning
             try:
@@ -589,11 +747,6 @@ class InventoryApp:
                 messagebox.showerror('Database Error', f'Failed to export from DB:\n{e}')
             except Exception as e:
                 messagebox.showerror('Export Error', f'Unexpected error during export:\n{e}')
-
-    def add_summary_table(self):
-        from excel_utils import add_summary_table_to_all_sheets
-        add_summary_table_to_all_sheets()
-        messagebox.showinfo('Success', 'Summary table has been added to all sheets.')
 
     def open_extractor(self):
         # Opens the extractor/merger window defined in extractor.py

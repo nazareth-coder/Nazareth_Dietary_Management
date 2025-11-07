@@ -1,0 +1,23 @@
+# Secrets and local settings
+settings.json
+.env
+.env.*
+
+# SQL dumps (keep schema files explicitly)
+*.sql
+!dietary.sql
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# OS metadata
+.DS_Store
+Thumbs.db

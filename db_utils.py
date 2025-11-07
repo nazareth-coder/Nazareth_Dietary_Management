@@ -10,12 +10,12 @@ from mysql.connector import errorcode
 
 from constants import COLUMNS
 
-# Default DB config (XAMPP defaults)
+# Default DB config (safe defaults; override via settings.json or env vars)
 DEFAULT_DB_CONFIG = {
     "host": "127.0.0.1",
     "port": 3306,
-    "user": "root",
-    "password": "Hakdog123!",
+    "user": "diet_app",
+    "password": "",
     "database": "dietary_mgmt",
 }
 

@@ -8,7 +8,7 @@ FLUSH PRIVILEGES;
 
 
 --to BUILD
-pyinstaller --clean --onefile --noconsole --icon ".\icon.ico" --collect-all mysql.connector .\inventory_app.py
+pyinstaller --clean --onefile --noconsole --name "Dietary Management System" --icon ".\icon.ico" --add-data "icon.ico;." --collect-all mysql.connector .\inventory_app.py
 
 
 --Check User
@@ -74,4 +74,92 @@ setx DMS_DB_HOST "127.0.0.1"
 setx DMS_DB_PORT "3306"
 setx DMS_DB_USER "diet_app"
 setx DMS_DB_PASSWORD "Hakdog123!"
+setx DMS_DB_NAME "dietary_mgmt"
+
+
+
+
+
+
+
+
+
+
+
+
+
+---------------------------------------------------------------------
+RUN THIS TO EVERY PC GOING TO CONNECT TO SERVER
+setx DMS_DB_HOST "192.168.0.98"
+setx DMS_DB_PORT "3306"
+setx DMS_DB_USER "diet_app"
+setx DMS_DB_PASSWORD "HAKDOG123!"
+setx DMS_DB_NAME "dietary_mgmt"
+
+AFTER RUNNING RUN THIS TO CHECK
+echo $env:DMS_DB_HOST
+
+
+
+CREATE USER IF NOT EXISTS 'diet_app'@'%' IDENTIFIED BY 'HAKDOG123!';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX
+  ON `dietary_mgmt`.*
+  TO 'diet_app'@'%';
+FLUSH PRIVILEGES;
+
+USE THIS TO GRANT BOTH IP'S 
+CREATE USER 'diet_app'@'192.168.x.client1' IDENTIFIED BY 'HAKDOG123!';
+CREATE USER 'diet_app'@'192.168.x.client2' IDENTIFIED BY 'HAKDOG123!';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON `dietary_mgmt`.* TO 'diet_app'@'192.168.x.client1';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON `dietary_mgmt`.* TO 'diet_app'@'192.168.x.client2';
+DROP USER 'diet_app'@'%';
+FLUSH PRIVILEGES;
+
+
+MORE DETAILED COMMAND
+-- Create per-client users
+CREATE USER IF NOT EXISTS 'diet_app'@'192.168.1.21' IDENTIFIED BY 'HAKDOG123!';
+CREATE USER IF NOT EXISTS 'diet_app'@'192.168.1.22' IDENTIFIED BY 'HAKDOG123!';
+
+-- (Optional) if you also run the app on the server itself:
+CREATE USER IF NOT EXISTS 'diet_app'@'localhost' IDENTIFIED BY 'HAKDOG123!';
+-- or, if the app on server connects via LAN IP:
+CREATE USER IF NOT EXISTS 'diet_app'@'192.168.1.10' IDENTIFIED BY 'HAKDOG123!';
+
+-- Grant least-privilege on the database
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX
+  ON `dietary_mgmt`.*
+  TO 'diet_app'@'192.168.1.21';
+
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX
+  ON `dietary_mgmt`.*
+  TO 'diet_app'@'192.168.1.22';
+
+-- If you created localhost or server-IP user, grant it too:
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX
+  ON `dietary_mgmt`.*
+  TO 'diet_app'@'localhost';
+
+-- Remove the broad wildcard user only AFTER the per-IP users exist
+DROP USER IF EXISTS 'diet_app'@'%';
+
+FLUSH PRIVILEGES;
+
+
+
+IF YOU RUN IT SERVER PC AND ANOTHER 1 PC
+CREATE USER IF NOT EXISTS 'diet_app'@'192.168.' IDENTIFIED BY 'HAKDOG123!';
+CREATE USER IF NOT EXISTS 'diet_app'@'localhost' IDENTIFIED BY 'HAKDOG123!';  -- or 'diet_app'@'192.168.1.10'
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON `dietary_mgmt`.* TO 'diet_app'@'192.168.1.21';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON `dietary_mgmt`.* TO 'diet_app'@'localhost';
+DROP USER IF EXISTS 'diet_app'@'%';
+FLUSH PRIVILEGES;
+
+
+
+RUN THIS TO SERVER PC IF YOU"RE GOING TO OPEN THE APP THERE
+setx DMS_DB_HOST "127.0.0.1"
+setx DMS_DB_PORT "3306"
+setx DMS_DB_USER "diet_app"
+setx DMS_DB_PASSWORD "HAKDOG123!"
 setx DMS_DB_NAME "dietary_mgmt"

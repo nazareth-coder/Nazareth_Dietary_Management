@@ -1,20 +1,22 @@
 # ui.py
 from tkinter import *
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from datetime import datetime
 import json
+import shutil
 import os
 import sys
 import platform
 from constants import *
 from extractor import open_extractor_window
-from db_utils import DatabaseError
-from excel_utils import ExcelFileOpenError
+from excel_utils import ExcelFileOpenError, load_patients, add_patient, update_patient, delete_patient
+from excel_auth import create_user, change_password, list_users, update_user, set_user_password, delete_user
 from typing import Optional
 
 class InventoryApp:
-    def __init__(self, root):
+    def __init__(self, root, user_info=None):
         self.root = root
+        self.user_info = user_info or {}
         self.entries = {}
         # Search state
         self.search_var = StringVar()
@@ -35,6 +37,7 @@ class InventoryApp:
         except Exception:
             pass
         self.create_widgets()
+        self._build_menus()
         self.load_data()
         self.refresh_table()
         # Auto-backup scheduling
@@ -46,6 +49,343 @@ class InventoryApp:
         if 'auto_summary' in self.settings:
             del self.settings['auto_summary']
             self.save_settings()
+
+    def _build_menus(self):
+        try:
+            menubar = Menu(self.root)
+
+            file_menu = Menu(menubar, tearoff=0)
+            # Change Password for any logged-in user; Create User for admin only
+            file_menu.add_command(label='Change Password', command=self._on_change_password)
+
+            role = (self.user_info.get('role') or '').lower()
+            if role == 'admin':
+                file_menu.add_separator()
+                file_menu.add_command(label='Create User', command=self._on_create_user)
+                file_menu.add_command(label='View Users', command=self._on_view_users)
+
+            file_menu.add_separator()
+            file_menu.add_command(label='Logout', command=self._on_logout)
+            file_menu.add_command(label='Exit', command=self.root.destroy)
+
+            menubar.add_cascade(label='File', menu=file_menu)
+            self.root.config(menu=menubar)
+
+            # Status bar with logged-in user info
+            display_name = self.user_info.get('full_name') or self.user_info.get('username') or 'Guest'
+            role_display = self.user_info.get('role', '').title() if self.user_info.get('role') else ''
+            status_text = f"Logged in as: {display_name}"
+            if role_display:
+                status_text += f" ({role_display})"
+            self.status_bar = ttk.Label(self.root, text=status_text, anchor='w')
+            self.status_bar.pack(side=BOTTOM, fill=X)
+        except Exception:
+            # Menus/status bar are convenience features; ignore failures
+            pass
+
+    def _on_view_users(self):
+        role = (self.user_info.get('role') or '').lower()
+        if role != 'admin':
+            messagebox.showerror('View Users', 'Only admin users can view/manage accounts.')
+            return
+
+        top = Toplevel(self.root)
+        top.title('Users')
+        top.transient(self.root)
+
+        try:
+            top.grab_set()
+            top.focus_set()
+        except Exception:
+            pass
+
+        frame = ttk.Frame(top, padding=10)
+        frame.pack(fill=BOTH, expand=True)
+
+        cols = ('username', 'full_name', 'role', 'last_login')
+        tree = ttk.Treeview(frame, columns=cols, show='headings', height=12)
+        tree.heading('username', text='Username')
+        tree.heading('full_name', text='Full Name')
+        tree.heading('role', text='Role')
+        tree.heading('last_login', text='Last Login')
+        tree.column('username', width=160, anchor='w')
+        tree.column('full_name', width=260, anchor='w')
+        tree.column('role', width=90, anchor='w')
+        tree.column('last_login', width=160, anchor='w')
+        tree.grid(row=0, column=0, columnspan=2, sticky='nsew')
+
+        yscroll = ttk.Scrollbar(frame, orient=VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=yscroll.set)
+        yscroll.grid(row=0, column=2, sticky='ns')
+
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_columnconfigure(1, weight=1)
+
+        def _refresh():
+            for item in tree.get_children():
+                tree.delete(item)
+            for u in list_users():
+                tree.insert('', 'end', values=(u.get('username', ''), u.get('full_name', ''), u.get('role', ''), u.get('last_login', '')))
+
+        def _get_selected_username() -> Optional[str]:
+            sel = tree.selection()
+            if not sel:
+                return None
+            vals = tree.item(sel[0], 'values')
+            if not vals:
+                return None
+            return str(vals[0])
+
+        def _on_reset_password():
+            uname = _get_selected_username()
+            if not uname:
+                messagebox.showerror('Reset Password', 'Please select a user.')
+                return
+            new_pw = simpledialog.askstring('Reset Password', f"New password for '{uname}' (min 6 characters):", show='•', parent=top)
+            if new_pw is None:
+                return
+            ok, msg = set_user_password(uname, new_pw)
+            if not ok:
+                messagebox.showerror('Reset Password', msg or 'Failed to update password.')
+                return
+            messagebox.showinfo('Reset Password', 'Password updated successfully.')
+
+        def _on_delete_user():
+            uname = _get_selected_username()
+            if not uname:
+                messagebox.showerror('Delete User', 'Please select a user.')
+                return
+            if not messagebox.askyesno('Delete User', f"Delete user '{uname}'?", parent=top):
+                return
+            ok, msg = delete_user(uname, requesting_username=self.user_info.get('username'))
+            if not ok:
+                messagebox.showerror('Delete User', msg or 'Failed to delete user.')
+                return
+            _refresh()
+
+        def _on_edit_user():
+            uname = _get_selected_username()
+            if not uname:
+                messagebox.showerror('Edit User', 'Please select a user.')
+                return
+
+            current = None
+            for u in list_users():
+                if u.get('username') == uname:
+                    current = u
+                    break
+            if not current:
+                messagebox.showerror('Edit User', 'User not found.')
+                return
+
+            edit = Toplevel(top)
+            edit.title(f"Edit User: {uname}")
+            edit.transient(top)
+            try:
+                edit.grab_set()
+                edit.focus_set()
+            except Exception:
+                pass
+
+            ef = ttk.Frame(edit, padding=10)
+            ef.pack(fill=BOTH, expand=True)
+
+            ttk.Label(ef, text='Username:').grid(row=0, column=0, sticky='w', padx=(0, 8), pady=6)
+            username_var = StringVar(value=current.get('username', ''))
+            username_entry = ttk.Entry(ef, textvariable=username_var, width=28)
+            username_entry.grid(row=0, column=1, sticky='ew', pady=6)
+
+            ttk.Label(ef, text='Full Name:').grid(row=1, column=0, sticky='w', padx=(0, 8), pady=6)
+            full_name_var = StringVar(value=current.get('full_name', ''))
+            full_name_entry = ttk.Entry(ef, textvariable=full_name_var, width=28)
+            full_name_entry.grid(row=1, column=1, sticky='ew', pady=6)
+
+            ttk.Label(ef, text='Role:').grid(row=2, column=0, sticky='w', padx=(0, 8), pady=6)
+            role_var = StringVar(value=(current.get('role') or 'user').lower())
+            role_cb = ttk.Combobox(ef, values=['admin', 'staff'], textvariable=role_var, state='readonly', width=25)
+            role_cb.grid(row=2, column=1, sticky='w', pady=6)
+
+            ef.grid_columnconfigure(1, weight=1)
+
+            def _save():
+                new_username = username_var.get().strip()
+                new_full_name = full_name_var.get().strip()
+                new_role = (role_var.get() or '').strip().lower()
+
+                ok, msg = update_user(uname, new_username=new_username, new_role=new_role, new_full_name=new_full_name)
+                if not ok:
+                    messagebox.showerror('Edit User', msg or 'Failed to update user.', parent=edit)
+                    return
+                edit.destroy()
+                _refresh()
+
+            btns = ttk.Frame(ef)
+            btns.grid(row=3, column=0, columnspan=2, sticky='e', pady=(10, 0))
+            ttk.Button(btns, text='Save', command=_save).grid(row=0, column=0, padx=(0, 6))
+            ttk.Button(btns, text='Cancel', command=edit.destroy).grid(row=0, column=1)
+
+            username_entry.focus_set()
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=1, column=0, columnspan=3, sticky='ew', pady=(10, 0))
+        btn_frame.grid_columnconfigure(0, weight=1)
+
+        left_btns = ttk.Frame(btn_frame)
+        left_btns.grid(row=0, column=0, sticky='w')
+        ttk.Button(left_btns, text='Refresh', command=_refresh).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(left_btns, text='Edit', command=_on_edit_user).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(left_btns, text='Reset Password', command=_on_reset_password).grid(row=0, column=2, padx=(0, 6))
+        ttk.Button(left_btns, text='Delete', command=_on_delete_user).grid(row=0, column=3, padx=(0, 6))
+
+        ttk.Button(btn_frame, text='Close', command=top.destroy).grid(row=0, column=1, sticky='e')
+
+        _refresh()
+
+    def _on_logout(self):
+        if messagebox.askyesno('Logout', 'Do you want to logout and close the application?'):
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+
+    def _on_change_password(self):
+        username = self.user_info.get('username')
+        if not username:
+            messagebox.showerror('Change Password', 'No logged-in user information available.')
+            return
+        old_pw = simpledialog.askstring('Change Password', 'Current password:', show='•', parent=self.root)
+        if old_pw is None:
+            return
+        new_pw = simpledialog.askstring('Change Password', 'New password (min 6 characters):', show='•', parent=self.root)
+        if new_pw is None:
+            return
+        if len(new_pw) < 6:
+            messagebox.showerror('Change Password', 'New password must be at least 6 characters long.')
+            return
+        confirm = simpledialog.askstring('Change Password', 'Confirm new password:', show='•', parent=self.root)
+        if confirm is None:
+            return
+        if new_pw != confirm:
+            messagebox.showerror('Change Password', 'New password and confirmation do not match.')
+            return
+        try:
+            ok = change_password(username, old_pw, new_pw)
+        except Exception as e:
+            messagebox.showerror('Change Password', f'Failed to change password:\n{e}')
+            return
+        if not ok:
+            messagebox.showerror('Change Password', 'Current password is incorrect or user could not be updated.')
+            return
+        messagebox.showinfo('Change Password', 'Password changed successfully.')
+
+    def _on_create_user(self):
+        role = (self.user_info.get('role') or '').lower()
+        if role != 'admin':
+            messagebox.showerror('Create User', 'Only admin users can create new accounts.')
+            return
+        username = simpledialog.askstring('Create User', 'New username:', parent=self.root)
+        if not username:
+            return
+        full_name = simpledialog.askstring('Create User', 'Full name (optional):', parent=self.root) or ''
+        new_pw = simpledialog.askstring('Create User', 'Password (min 6 characters):', show='•', parent=self.root)
+        if not new_pw:
+            return
+        if len(new_pw) < 6:
+            messagebox.showerror('Create User', 'Password must be at least 6 characters long.')
+            return
+        confirm = simpledialog.askstring('Create User', 'Confirm password:', show='•', parent=self.root)
+        if confirm is None or confirm != new_pw:
+            messagebox.showerror('Create User', 'Password confirmation does not match.')
+            return
+        # Role selection via dropdown (admin or staff, default to staff)
+        role_choice = self._ask_role_choice()
+        if role_choice is None:
+            return
+
+        try:
+            created = create_user(username.strip(), new_pw, role_choice, full_name.strip())
+        except Exception as e:
+            messagebox.showerror('Create User', f'Failed to create user:\n{e}')
+            return
+        if not created:
+            messagebox.showerror('Create User', 'User already exists or could not be created.')
+            return
+        messagebox.showinfo('Create User', f"User '{username}' created successfully.")
+
+    def _ask_role_choice(self):
+        """Show a small modal dialog to choose role (admin/staff). Returns role string or None if cancelled."""
+        top = Toplevel(self.root)
+        top.title('Select Role')
+        top.transient(self.root)
+        top.resizable(False, False)
+
+        # Center over parent
+        try:
+            top.update_idletasks()
+            parent_x = self.root.winfo_rootx()
+            parent_y = self.root.winfo_rooty()
+            parent_w = self.root.winfo_width()
+            parent_h = self.root.winfo_height()
+            win_w, win_h = 260, 120
+            x = parent_x + max(0, (parent_w - win_w) // 2)
+            y = parent_y + max(0, (parent_h - win_h) // 2)
+            top.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        except Exception:
+            pass
+
+        # Make modal
+        try:
+            top.grab_set()
+            top.focus_set()
+        except Exception:
+            pass
+
+        selected_role = {'value': None}
+
+        frame = ttk.Frame(top, padding=10)
+        frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(frame, text='Role:').grid(row=0, column=0, sticky='w', padx=(0, 6), pady=(0, 8))
+        role_var = StringVar(value='staff')
+        role_cb = ttk.Combobox(frame, values=['admin', 'staff'], textvariable=role_var, state='readonly', width=15)
+        role_cb.grid(row=0, column=1, sticky='w', pady=(0, 8))
+        role_cb.current(1)  # default to 'staff'
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=1, column=0, columnspan=2, sticky='e')
+
+        def on_ok():
+            value = (role_var.get() or '').strip().lower()
+            if value not in ('admin', 'staff'):
+                value = 'staff'
+            selected_role['value'] = value
+            top.destroy()
+
+        def on_cancel():
+            selected_role['value'] = None
+            top.destroy()
+
+        ok_btn = ttk.Button(btn_frame, text='OK', command=on_ok)
+        ok_btn.grid(row=0, column=0, padx=(0, 6))
+        cancel_btn = ttk.Button(btn_frame, text='Cancel', command=on_cancel)
+        cancel_btn.grid(row=0, column=1)
+
+        # Handle window close as cancel
+        top.protocol('WM_DELETE_WINDOW', on_cancel)
+
+        # Keyboard bindings
+        top.bind('<Return>', lambda event: on_ok())
+        top.bind('<Escape>', lambda event: on_cancel())
+
+        # Focus combobox initially
+        try:
+            role_cb.focus_set()
+        except Exception:
+            pass
+
+        top.wait_window()
+        return selected_role['value']
 
     def create_widgets(self):
         style = ttk.Style()
@@ -226,7 +566,7 @@ class InventoryApp:
         ttk.Button(btn_frame, text='Update Patient', command=self.update_item).grid(row=0, column=1, padx=3)
         ttk.Button(btn_frame, text='Delete Patient', command=self.delete_item).grid(row=0, column=2, padx=3)
         ttk.Button(btn_frame, text='Open Extractor', command=self.open_extractor).grid(row=0, column=3, padx=3)
-        ttk.Button(btn_frame, text='Export to Excel', command=self.export_excel).grid(row=0, column=4, padx=3)
+        ttk.Button(btn_frame, text='Tally', command=self.tally_data).grid(row=0, column=4, padx=3)
 
         # Backup controls
         ttk.Button(btn_frame, text='Backup Now', command=self.backup_now).grid(row=0, column=6, padx=(12, 3))
@@ -303,6 +643,11 @@ class InventoryApp:
         
         # Bind selection event to input population
         self.tree.bind('<<TreeviewSelect>>', self.on_row_select)
+        # Allow exiting edit mode by clicking on empty space in the table
+        try:
+            self.tree.bind('<Button-1>', self.on_tree_click, add='+')
+        except Exception:
+            pass
 
         # Scrollbars for the table
         vscrollbar = ttk.Scrollbar(table_frame, orient=VERTICAL, command=self.tree.yview)
@@ -358,10 +703,27 @@ class InventoryApp:
                 self.add_button['state'] = 'disabled'
 
 
+    def on_tree_click(self, event):
+        # If user clicks on empty space (no row), clear selection and exit edit mode
+        try:
+            row_id = self.tree.identify_row(event.y)
+        except Exception:
+            row_id = None
+        if not row_id:
+            try:
+                self.tree.selection_remove(self.tree.selection())
+            except Exception:
+                pass
+            try:
+                self.clear_fields()
+            except Exception:
+                pass
+        # Return None to allow normal processing for row/header clicks
+
+
     def add_item(self):
         # Compose item in the order of COLUMNS
-        from db_utils import add_patient, load_patients
-        # Auto-increment Patient ID
+                # Auto-increment Patient ID
         patients = load_patients()
         existing_ids = [row[0] for row in patients if isinstance(row[0], int) or (isinstance(row[0], str) and str(row[0]).isdigit())]
         next_id = max([int(i) for i in existing_ids], default=0) + 1 if existing_ids else 1
@@ -390,7 +752,7 @@ class InventoryApp:
             return
         try:
             add_patient(item)
-        except DatabaseError as e:
+        except Exception as e:
             messagebox.showerror('Database Error', str(e))
             return
         # Optionally regenerate summary tables
@@ -424,7 +786,6 @@ class InventoryApp:
             self.add_button['state'] = 'normal'
 
     def delete_item(self):
-        from db_utils import delete_patient
         selected = self.tree.focus()
         if not selected:
             messagebox.showerror('Error', 'Please select a patient to delete.')
@@ -436,7 +797,7 @@ class InventoryApp:
         item_id = values[0]
         try:
             delete_patient(item_id)
-        except DatabaseError as e:
+        except Exception as e:
             messagebox.showerror('Database Error', str(e))
             return
         self.load_data()
@@ -446,7 +807,6 @@ class InventoryApp:
         messagebox.showinfo('Success', 'Patient deleted successfully.')
 
     def update_item(self):
-        from db_utils import update_patient
         selected = self.tree.focus()
         if not selected:
             messagebox.showerror('Error', 'Please select a patient to update.')
@@ -476,7 +836,7 @@ class InventoryApp:
                     updated_item.append(w.get())
         try:
             update_patient(item_id, updated_item)
-        except DatabaseError as e:
+        except Exception as e:
             messagebox.showerror('Database Error', str(e))
             return
         # Summary tables are now handled by export functionality
@@ -486,7 +846,6 @@ class InventoryApp:
 
     def load_data(self):
         # Load patients from Excel once; other operations use this cache
-        from db_utils import load_patients
         try:
             self.all_rows = load_patients()
         except Exception:
@@ -641,19 +1000,16 @@ class InventoryApp:
             self.save_settings()
 
     def backup_now(self):
+        """Copy the Excel database to the backup folder with timestamp."""
         try:
-            from backup_utils import backup_all
             backup_dir = self.settings.get('backup_dir') or os.path.join(self.settings_dir, 'backups')
             os.makedirs(backup_dir, exist_ok=True)
-            results = backup_all(backup_dir, with_excel=False)
-            msg = "Backup created:\n"
-            if 'sql' in results:
-                msg += f"- SQL: {results['sql']}\n"
-            if 'excel' in results:
-                msg += f"- Excel: {results['excel']}\n"
-            messagebox.showinfo('Backup', msg.rstrip())
-        except DatabaseError as e:
-            messagebox.showerror('Database Error', f'Backup failed due to database error:\n{e}')
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            dest = os.path.join(backup_dir, f"Dietary_Report_{ts}.xlsx")
+            shutil.copy2(EXCEL_FILE, dest)
+            messagebox.showinfo('Backup', f'Backup created:\n{dest}')
+        except ExcelFileOpenError as e:
+            messagebox.showerror('Excel Error', f'Backup failed; workbook may be open:\n{e}')
         except Exception as e:
             messagebox.showerror('Backup Error', f'Unexpected error during backup:\n{e}')
 
@@ -709,10 +1065,11 @@ class InventoryApp:
     def _run_auto_backup_tick(self):
         # Perform backup quietly; surface errors
         try:
-            from backup_utils import backup_all
             backup_dir = self.settings.get('backup_dir') or os.path.join(self.settings_dir, 'backups')
             os.makedirs(backup_dir, exist_ok=True)
-            backup_all(backup_dir, with_excel=False)
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            dest = os.path.join(backup_dir, f"Dietary_Report_{ts}.xlsx")
+            shutil.copy2(EXCEL_FILE, dest)
         except Exception as e:
             # Non-fatal: show a brief warning
             try:
@@ -743,10 +1100,21 @@ class InventoryApp:
             try:
                 export_db_to_excel(export_path)
                 messagebox.showinfo('Exported', f'Inventory exported to {export_path}')
-            except DatabaseError as e:
-                messagebox.showerror('Database Error', f'Failed to export from DB:\n{e}')
+            except ExcelFileOpenError as e:
+                messagebox.showerror('Excel Error', f'Failed to export:\n{e}')
             except Exception as e:
                 messagebox.showerror('Export Error', f'Unexpected error during export:\n{e}')
+
+    def tally_data(self):
+        """Generate/refresh summary tables in the Excel workbook."""
+        try:
+            from excel_utils import add_summary_table_to_all_sheets
+            add_summary_table_to_all_sheets()
+            messagebox.showinfo('Tally', 'Summary tables have been generated / updated successfully.')
+        except ExcelFileOpenError as e:
+            messagebox.showerror('Excel Error', f'Failed to tally data; workbook may be open:\n{e}')
+        except Exception as e:
+            messagebox.showerror('Tally Error', f'Unexpected error during tally:\n{e}')
 
     def open_extractor(self):
         # Opens the extractor/merger window defined in extractor.py

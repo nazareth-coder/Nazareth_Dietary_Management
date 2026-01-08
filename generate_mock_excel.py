@@ -3,17 +3,17 @@ from openpyxl import Workbook
 from random import randint, choice
 from datetime import datetime, timedelta
 
-from constants import COLUMNS
+from constants import COLUMNS, AGE_GROUP_OPTIONS, NUTRITIONAL_STATUS_OPTIONS
 
 names = ['John Smith', 'Jane Doe', 'Alice Lee', 'Bob Cruz', 'Carla Reyes', 'Mike Tan', 'Anna Lim', 'Chris Yu', 'Nina Gomez', 'Paul Chan', 'Grace Ong', 'Leo Santos', 'Mia Cruz', 'Ray Lee', 'Ella Tan', 'Sam Yu', 'Lily Ong', 'Ivan Lim', 'Rita Chan', 'Vince Gomez']
 diagnoses = ['Pneumonia', 'Dengue', 'Anemia', 'Diabetes', 'Malnutrition', 'Asthma', 'UTI', 'Appendicitis', 'Sepsis', 'Hypertension']
 wards = ['ICU', 'NICU', 'Observation', 'Recovery', 'Caring 1', 'Caring 2', 'Caring 3', 'Caring 4']
 subspecialties = ['Pulmo', 'Infectious', 'Hema/Oncology', 'Endo/Metabolic Disorder', 'General Service', 'Surgery', 'Cardio', 'Neuro', 'Gastro', 'Renal']
-age_groups = ['0-4 years old', '5-9 years old', '10-14 years old', '15-18 years old', '19-29 years old', '30-39 years old', '40-49 years old', '50-59 years old', '60 years old and above']
+age_groups = AGE_GROUP_OPTIONS
 types_of_visit = ['Routine', 'Referred By Doctor', 'Referred By Nurse Through Screening form']
 purposes = ['Monitoring', 'Reassessment', 'Initial Assessment', 'Nutrition Education']
 nutrition_support = ['Yes', 'No']
-nutritional_status = ['Normal', 'Underweight', 'Stunting', 'Overweight', 'Obese', 'MAM', 'SAM']
+nutritional_status = NUTRITIONAL_STATUS_OPTIONS
 bowel_movements = ['Normal BM', 'Loose BM of >3x in 24h', 'No BM for 48hrs']
 emesis = ['Present', 'Absent']
 abdominal_distention = ['Present', 'Absent']
@@ -26,28 +26,27 @@ GIVEN_NCP_OPTIONS = ['Yes', 'No']
 mock_data = []
 base_date = datetime(2025, 1, 1)
 diet_prescriptions_options = ['Low sodium', 'High protein', 'NPO', 'Soft diet', 'Diabetic', 'Regular', '']
-for i in range(1, 499):
+for i in range(1, 29):
     name = choice(names) + f" {i}"
     sex = choice(['male', 'female'])
-    age = randint(1, 75)
-    if age < 10:
-        age_group = '0-4 years old'
+    age = randint(0, 80)
+    # Map numeric age to the configured age group labels
+    if age < 1:
+        age_group = 'Below 1 Year'
+    elif age < 5:
+        age_group = '1-4 Years old'
     elif age < 10:
-        age_group = '5-9 years old'
+        age_group = '5-9 Years old'
     elif age < 15:
-        age_group = '10-14 years old'
-    elif age < 19:
-        age_group = '15-18 years old'
-    elif age < 30:
-        age_group = '19-29 years old'
-    elif age < 40:
-        age_group = '30-39 years old'
-    elif age < 50:
-        age_group = '40-49 years old'
-    elif age < 60:
-        age_group = '50-59 years old'
+        age_group = '10-14 Years old'
+    elif age < 20:
+        age_group = '15-19 Years old'
+    elif age < 45:
+        age_group = '20-44 Years old'
+    elif age < 65:
+        age_group = '45-64 Years old'
     else:
-        age_group = '60 years old and above'
+        age_group = '65 Years old and above'
     # Distribute admission dates evenly across all months
     month = ((i-1) % 12) + 1
     day = randint(1, 28)  # Safe for all months

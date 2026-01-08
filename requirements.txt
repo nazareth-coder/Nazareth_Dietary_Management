@@ -3,3 +3,4 @@ pandas
 tk
 mysql-connector-python
 ttkbootstrap
+bcrypt

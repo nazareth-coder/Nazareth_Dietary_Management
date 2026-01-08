@@ -10,6 +10,8 @@ FLUSH PRIVILEGES;
 --to BUILD
 pyinstaller --clean --onefile --noconsole --name "Dietary Management System" --icon ".\icon.ico" --add-data "icon.ico;." --collect-all mysql.connector .\inventory_app.py
 
+pyinstaller --clean --onefile --noconsole --name "Dietary Management System" --icon ".\icon.ico" --add-data "icon.ico;." .\inventory_app.py
+
 
 --Check User
 SELECT User, Host FROM mysql.user

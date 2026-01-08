@@ -4,6 +4,7 @@ from openpyxl import Workbook
 from datetime import datetime
 from constants import COLUMNS, EXCEL_FILE
 from openpyxl.styles import Protection
+from excel_auth import ensure_users_sheet
 
 def init_excel():
     try:
@@ -24,6 +25,13 @@ def init_excel():
         wb.create_sheet('JULY-DEC')
         wb['JULY-DEC'].append(COLUMNS)
         wb.save(EXCEL_FILE)
+
+    # Ensure login Users sheet exists in the same workbook
+    try:
+        ensure_users_sheet()
+    except Exception:
+        # Non-fatal; the app can still run without login until resolved
+        pass
 
 def load_patients():
     wb = openpyxl.load_workbook(EXCEL_FILE)
@@ -174,8 +182,8 @@ def add_summary_table_to_all_sheets():
         'Number of patients with nutrition documentation',
         'Number of patients given nutrition care process (ADIME)',
     ]
-    age_groups = ['0-4 years old', '5-9 years old', '10-14 years old', '15-18 years old', '19-29 years old', '30-39 years old', '40-49 years old', '50-59 years old', '60 years old and above']
-    table_age_groups = ['0-4', '5-9', '10-14', '15-18', '19-29', '30-39', '40-49', '50-59', '60 & above']
+    age_groups = ['Below 1 Year', '1-4 Years old', '5-9 Years old', '10-14 Years old', '15-19 Years old', '20-44 Years old', '45-64 Years old', '65 Years old and above']
+    table_age_groups = ['Below 1 Year','1-4 Years old', '5-9 Years old', '10-14 Years old', '15-19 Years old', '20-44 Years old', '45-64 Years old', '65 Years old and above']
     sex = ['male', 'female']
     sex_table = ['M', 'F']
     month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -311,8 +319,9 @@ def add_summary_table_to_all_sheets():
                         ws.cell(row=start_row + admitted_row_idx, column=col_ptr+1, value=subtotal_f)
                         ws.cell(row=start_row + admitted_row_idx, column=col_ptr+2, value=total)
 
-            # --- Fill Stunting, Underweight, Overweight, Obese rows ---
+            # --- Fill Wasting, Stunting, Underweight, Overweight, Obese rows ---
             metric_names = {
+                "a. Wasting": "Wasting",
                 "b. Stunting": "Stunting",
                 "c. Underweight": "Underweight",
                 "d. Overweight": "Overweight",
@@ -435,8 +444,8 @@ def add_summary_table_to_all_sheets():
 
                 # --- Fill Moderate and Severe acute malnutrition rows ---
     mam_sam_metrics = {
-        "i. Moderate acute malnutrition": "MAM",
-        "ii. Severe acute malnutrition": "SAM"
+        "i. Moderate acute malnutrition": "Moderate Acute Malnutrition",
+        "ii. Severe acute malnutrition": "Severe Acute Malnutrition"
     }
     # Find row indices for these metrics
     mam_sam_row_indices = {}
@@ -458,10 +467,12 @@ def add_summary_table_to_all_sheets():
             # Set up counters
             mam_counts = [[0, 0] for _ in age_groups]
             sam_counts = [[0, 0] for _ in age_groups]
+            mam_label = mam_sam_metrics["i. Moderate acute malnutrition"].lower()
+            sam_label = mam_sam_metrics["ii. Severe acute malnutrition"].lower()
             for row in ws.iter_rows(min_row=2, values_only=True):
                 age_val = row[age_col_idx]
                 sex_val = str(row[sex_col_idx]).strip().lower() if row[sex_col_idx] else ''
-                status_val = str(row[status_col_idx]).strip().upper() if row[status_col_idx] else ''
+                status_val = str(row[status_col_idx]).strip().lower() if row[status_col_idx] else ''
                 try:
                     age_tbl_idx = age_groups.index(age_val)
                 except Exception:
@@ -469,9 +480,9 @@ def add_summary_table_to_all_sheets():
                 sex_tbl_idx = 0 if sex_val == 'male' else 1 if sex_val == 'female' else None
                 if sex_tbl_idx is None:
                     continue
-                if status_val == "MAM":
+                if status_val == mam_label:
                     mam_counts[age_tbl_idx][sex_tbl_idx] += 1
-                elif status_val == "SAM":
+                elif status_val == sam_label:
                     sam_counts[age_tbl_idx][sex_tbl_idx] += 1
             # Write counts to summary table
             start_col = 31  # AE

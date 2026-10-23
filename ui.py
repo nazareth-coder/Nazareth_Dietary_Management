@@ -468,7 +468,7 @@ class InventoryApp:
         bowel_movement_options = BOWEL_MOVEMENT_OPTIONS
         emesis_options = EMESIS_OPTIONS
         abdominal_distention_options = ABDOMINAL_DISTENTION_OPTIONS
-        biochemical_parameters_options = BIOCHEMICAL_PARAMETERS_OPTIONS
+        disease_options = DISEASE_OPTIONS
         rnd_dietary_management_options = RND_DIETARY_MANAGEMENT_OPTIONS
         encoded_by_options = ENCODED_BY_OPTIONS
         
@@ -505,8 +505,8 @@ class InventoryApp:
                 widget = ttk.Combobox(frame, values=EMESIS_OPTIONS, width=12)
             elif colname == 'Abdominal Distention':
                 widget = ttk.Combobox(frame, values=ABDOMINAL_DISTENTION_OPTIONS, width=12)
-            elif colname == 'Biochemical Parameters':
-                widget = ttk.Combobox(frame, values=BIOCHEMICAL_PARAMETERS_OPTIONS, width=30)
+            elif colname == 'Disease and other Co-morbidities':
+                widget = ttk.Combobox(frame, values=DISEASE_OPTIONS, width=30)
             elif colname == 'RND Dietary Management':
                 widget = ttk.Combobox(frame, values=RND_DIETARY_MANAGEMENT_OPTIONS, width=30)
             elif colname == 'Diet Prescriptions(Current)':

@@ -3,32 +3,55 @@ from openpyxl import Workbook
 from random import randint, choice
 from datetime import datetime, timedelta
 
-from constants import COLUMNS, AGE_GROUP_OPTIONS, NUTRITIONAL_STATUS_OPTIONS
+from constants import (
+    COLUMNS,
+    AGE_GROUP_OPTIONS,
+    NUTRITIONAL_STATUS_OPTIONS,
+    WARD_OPTIONS,
+    SUBSPECIALTY_OPTIONS,
+    TYPE_OF_VISIT_OPTIONS,
+    PURPOSE_OPTIONS,
+    NUTRITION_SUPPORT_OPTIONS,
+    BOWEL_MOVEMENT_OPTIONS,
+    EMESIS_OPTIONS,
+    ABDOMINAL_DISTENTION_OPTIONS,
+    DISEASE_OPTIONS,
+    RND_DIETARY_MANAGEMENT_OPTIONS,
+    ENCODED_BY_OPTIONS,
+    WITH_DOCUMENTS_OPTIONS,
+    GIVEN_NCP_OPTIONS,
+)
 
-names = ['John Smith', 'Jane Doe', 'Alice Lee', 'Bob Cruz', 'Carla Reyes', 'Mike Tan', 'Anna Lim', 'Chris Yu', 'Nina Gomez', 'Paul Chan', 'Grace Ong', 'Leo Santos', 'Mia Cruz', 'Ray Lee', 'Ella Tan', 'Sam Yu', 'Lily Ong', 'Ivan Lim', 'Rita Chan', 'Vince Gomez']
-diagnoses = ['Pneumonia', 'Dengue', 'Anemia', 'Diabetes', 'Malnutrition', 'Asthma', 'UTI', 'Appendicitis', 'Sepsis', 'Hypertension']
-wards = ['ICU', 'NICU', 'Observation', 'Recovery', 'Caring 1', 'Caring 2', 'Caring 3', 'Caring 4']
-subspecialties = ['Pulmo', 'Infectious', 'Hema/Oncology', 'Endo/Metabolic Disorder', 'General Service', 'Surgery', 'Cardio', 'Neuro', 'Gastro', 'Renal']
+names = [
+    'John Smith', 'Jane Doe', 'Alice Lee', 'Bob Cruz', 'Carla Reyes',
+    'Mike Tan', 'Anna Lim', 'Chris Yu', 'Nina Gomez', 'Paul Chan',
+    'Grace Ong', 'Leo Santos', 'Mia Cruz', 'Ray Lee', 'Ella Tan',
+    'Sam Yu', 'Lily Ong', 'Ivan Lim', 'Rita Chan', 'Vince Gomez',
+]
+diagnoses = [
+    'Pneumonia', 'Dengue', 'Anemia', 'Diabetes', 'Malnutrition',
+    'Asthma', 'UTI', 'Appendicitis', 'Sepsis', 'Hypertension',
+]
+wards = WARD_OPTIONS
+subspecialties = SUBSPECIALTY_OPTIONS
 age_groups = AGE_GROUP_OPTIONS
-types_of_visit = ['Routine', 'Referred By Doctor', 'Referred By Nurse Through Screening form']
-purposes = ['Monitoring', 'Reassessment', 'Initial Assessment', 'Nutrition Education']
-nutrition_support = ['Yes', 'No']
+types_of_visit = TYPE_OF_VISIT_OPTIONS
+purposes = PURPOSE_OPTIONS
+nutrition_support = NUTRITION_SUPPORT_OPTIONS
 nutritional_status = NUTRITIONAL_STATUS_OPTIONS
-bowel_movements = ['Normal BM', 'Loose BM of >3x in 24h', 'No BM for 48hrs']
-emesis = ['Present', 'Absent']
-abdominal_distention = ['Present', 'Absent']
-biochem = ['Normal Lab Values', 'Elevated Liver Enzymes', 'Hypoalbuminemia', 'Elevated Serum Glucose', 'Hypothyroidism', 'Electrolyte Derangement']
-rnd_mgmt = ['Maintain Current Feeding', 'Change of Feeding Prescription', 'Provision of Modulars']
-encoded_by = ['RB', 'LA', 'JD', 'DM', 'Inter 1', 'Inter 2', 'Intern 3', 'Intern 4']
-WITH_DOCUMENTS_OPTIONS = ['Yes', 'No']
-GIVEN_NCP_OPTIONS = ['Yes', 'No']
+bowel_movements = BOWEL_MOVEMENT_OPTIONS
+emesis = EMESIS_OPTIONS
+abdominal_distention = ABDOMINAL_DISTENTION_OPTIONS
+rnd_mgmt = RND_DIETARY_MANAGEMENT_OPTIONS
+encoded_by = ENCODED_BY_OPTIONS
 
 mock_data = []
 base_date = datetime(2025, 1, 1)
 diet_prescriptions_options = ['Low sodium', 'High protein', 'NPO', 'Soft diet', 'Diabetic', 'Regular', '']
 for i in range(1, 29):
     name = choice(names) + f" {i}"
-    sex = choice(['male', 'female'])
+    # Use same casing as UI options
+    sex = choice(['Male', 'Female'])
     age = randint(0, 80)
     # Map numeric age to the configured age group labels
     if age < 1:
@@ -66,7 +89,8 @@ for i in range(1, 29):
     bm = choice(bowel_movements)
     em = choice(emesis)
     abd = choice(abdominal_distention)
-    bio = choice(biochem)
+    # Disease / co-morbidities used by summary table
+    disease = choice(DISEASE_OPTIONS)
     rnd = choice(rnd_mgmt)
     diet_presc = choice(diet_prescriptions_options)
     with_docs = choice(WITH_DOCUMENTS_OPTIONS)
@@ -74,7 +98,39 @@ for i in range(1, 29):
     encoder = choice(encoded_by)
     encoded_dt = visit_dt.strftime('%Y-%m-%d')
     last_updated = datetime(2025, 7, 1, 10, 0, 0).strftime('%Y-%m-%d %H:%M:%S')
-    row = [i, name, sex, age, age_group, ward_adm_dt.strftime('%Y-%m-%d'), visit_dt.strftime('%Y-%m-%d'), diagnosis, wsupport, ward, subspec, height, weight, visit_type, purpose, zscore, bmi_pct, nut_status, bm, em, abd, bio, rnd, diet_presc, with_docs, given_ncp, encoder, encoded_dt, last_updated]
+    # Row must match COLUMNS order; put disease into the
+    # 'Disease and other Co-morbidities' column.
+    row = [
+        i,
+        name,
+        sex,
+        age,
+        age_group,
+        ward_adm_dt.strftime('%Y-%m-%d'),
+        visit_dt.strftime('%Y-%m-%d'),
+        diagnosis,
+        wsupport,
+        ward,
+        subspec,
+        height,
+        weight,
+        visit_type,
+        purpose,
+        zscore,
+        bmi_pct,
+        nut_status,
+        bm,
+        em,
+        abd,
+        disease,
+        rnd,
+        diet_presc,
+        with_docs,
+        given_ncp,
+        encoder,
+        encoded_dt,
+        last_updated,
+    ]
     mock_data.append(row)
 
 wb = Workbook()

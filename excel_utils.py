@@ -2,7 +2,7 @@
 import openpyxl
 from openpyxl import Workbook
 from datetime import datetime
-from constants import COLUMNS, EXCEL_FILE
+from constants import COLUMNS, EXCEL_FILE, DISEASE_OPTIONS
 from openpyxl.styles import Protection
 from excel_auth import ensure_users_sheet
 
@@ -161,6 +161,8 @@ def export_excel(export_path):
 def add_summary_table_to_all_sheets():
     import openpyxl.utils
     wb = openpyxl.load_workbook(EXCEL_FILE)
+
+    # --- Build metrics list, including one row per disease option ---
     metrics = [
         'Number of patients admitted',
         'Number of nutritionally-at-risk (NAR) patients',
@@ -172,16 +174,20 @@ def add_summary_table_to_all_sheets():
         '  d. Overweight',
         '  e. Obese',
         '  f. Disease and other co-morbidities (Please specify)',
-        '    i.',
-        '    ii.',
-        '    iii.',
-        '    iv.',
+    ]
+
+    # Add one line per disease, indented like the original i-iv placeholders.
+    # Cells in these rows will be filled based on the "Disease and other Co-morbidities" column.
+    for disease in DISEASE_OPTIONS:
+        metrics.append(f'    {disease}')
+
+    metrics.extend([
         'Number of NAR patients given nutrition screening (by the nurse)',
         'Number of patients given nutrition assessment',
         'Number of patients given nutrition intervention',
         'Number of patients with nutrition documentation',
         'Number of patients given nutrition care process (ADIME)',
-    ]
+    ])
     age_groups = ['Below 1 Year', '1-4 Years old', '5-9 Years old', '10-14 Years old', '15-19 Years old', '20-44 Years old', '45-64 Years old', '65 Years old and above']
     table_age_groups = ['Below 1 Year','1-4 Years old', '5-9 Years old', '10-14 Years old', '15-19 Years old', '20-44 Years old', '45-64 Years old', '65 Years old and above']
     sex = ['male', 'female']
@@ -189,28 +195,55 @@ def add_summary_table_to_all_sheets():
     month_names = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
     sheet_names = ['Main', 'JAN-JUNE', 'JULY-DEC'] + month_names
 
-    # Map metric index to column in data
-    metric_to_col = {
-        14: 'Type Of Visit',           # 'Number of NAR patients given nutrition screening (by the nurse)'
-        15: 'Purpose of Visit',        # 'Number of patients given nutrition assessment'
-        16: 'RND Dietary Management',  # 'Number of patients given nutrition intervention'
+    # Map metric label to column in data; later we will translate this to
+    # indices after building the metrics list so that insertions (like
+    # per-disease rows) do not break the mapping.
+    metric_label_to_col = {
+        'Number of NAR patients given nutrition screening (by the nurse)': 'Type Of Visit',
+        'Number of patients given nutrition assessment': 'Purpose of Visit',
+        'Number of patients given nutrition intervention': 'RND Dietary Management',
     }
+
+    # Translate labels to metric indices
+    metric_to_col = {}
+    for idx, metric in enumerate(metrics):
+        for label, col_name in metric_label_to_col.items():
+            if metric.strip().lower() == label.strip().lower():
+                metric_to_col[idx] = col_name
 
     for sheet_name in sheet_names:
         if sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             start_col = 31  # AE
             start_row = 1
+            metrics_start_row = start_row + 2  # Header uses two rows
 
-            # --- Write header row ---
+            # --- Write two-row header ---
+            # Metrics column header (merged over two rows)
             ws.cell(row=start_row, column=start_col, value='Metrics')
+            ws.merge_cells(start_row=start_row, start_column=start_col,
+                           end_row=start_row+1, end_column=start_col)
+
+            # Age group headers: merged cell on row 1, M/F on row 2
             col = start_col + 1
             for group in table_age_groups:
-                for s in sex_table:
-                    ws.cell(row=start_row, column=col, value=f'{group}\n{s}')
-                    col += 1
-            ws.cell(row=start_row, column=col, value='Subtotal\nM')
-            ws.cell(row=start_row, column=col+1, value='Subtotal\nF')
+                ws.merge_cells(start_row=start_row, start_column=col,
+                               end_row=start_row, end_column=col+1)
+                ws.cell(row=start_row, column=col, value=group)
+                ws.cell(row=start_row+1, column=col, value='M')
+                ws.cell(row=start_row+1, column=col+1, value='F')
+                col += 2
+
+            # Subtotal columns (M/F)
+            ws.merge_cells(start_row=start_row, start_column=col,
+                           end_row=start_row, end_column=col+1)
+            ws.cell(row=start_row, column=col, value='Subtotal')
+            ws.cell(row=start_row+1, column=col, value='M')
+            ws.cell(row=start_row+1, column=col+1, value='F')
+
+            # TOTAL column (single column spanning two rows)
+            ws.merge_cells(start_row=start_row, start_column=col+2,
+                           end_row=start_row+1, end_column=col+2)
             ws.cell(row=start_row, column=col+2, value='TOTAL')
 
             # --- Prepare data structures for counts ---
@@ -246,7 +279,7 @@ def add_summary_table_to_all_sheets():
 
             # --- Write metrics and counts to table ---
             for i, metric in enumerate(metrics):
-                ws.cell(row=start_row + 1 + i, column=start_col, value=metric)
+                ws.cell(row=metrics_start_row + i, column=start_col, value=metric)
                 if i in metric_to_col:
                     # Fill counts for this metric
                     subtotal_m = 0
@@ -255,24 +288,24 @@ def add_summary_table_to_all_sheets():
                     for ag in range(len(table_age_groups)):
                         for sx in range(2):
                             val = counts[i][ag][sx]
-                            ws.cell(row=start_row + 1 + i, column=start_col + 1 + ag*2 + sx, value=val)
+                            ws.cell(row=metrics_start_row + i, column=start_col + 1 + ag*2 + sx, value=val)
                             if sx == 0:
                                 subtotal_m += val
                             else:
                                 subtotal_f += val
                             total += val
                     # Write subtotals and total
-                    ws.cell(row=start_row + 1 + i, column=start_col + 1 + len(table_age_groups)*2, value=subtotal_m)
-                    ws.cell(row=start_row + 1 + i, column=start_col + 2 + len(table_age_groups)*2, value=subtotal_f)
-                    ws.cell(row=start_row + 1 + i, column=start_col + 3 + len(table_age_groups)*2, value=total)
+                    ws.cell(row=metrics_start_row + i, column=start_col + 1 + len(table_age_groups)*2, value=subtotal_m)
+                    ws.cell(row=metrics_start_row + i, column=start_col + 2 + len(table_age_groups)*2, value=subtotal_f)
+                    ws.cell(row=metrics_start_row + i, column=start_col + 3 + len(table_age_groups)*2, value=total)
                 else:
                     # Fill empty cells for non-implemented metrics
                     for c in range(start_col + 1, start_col + 1 + len(table_age_groups)*2 + 3):
-                        ws.cell(row=start_row + 1 + i, column=c, value=None)
+                        ws.cell(row=metrics_start_row + i, column=c, value=None)
 
 
             # --- Fill 'Number of patients admitted' row ---
-            admitted_row_idx = 1  # Row index in summary table for 'Number of patients admitted' (first metric)
+            admitted_row_idx = 0  # 0-based index in metrics list for first metric
             for sheet_name in sheet_names:
                 if sheet_name in wb.sheetnames:
                     ws = wb[sheet_name]
@@ -300,6 +333,7 @@ def add_summary_table_to_all_sheets():
                         # Write counts to summary table
                         start_col = 31  # AE
                         start_row = 1
+                        metrics_start_row = start_row + 2
                         col_ptr = start_col + 1
                         subtotal_m = 0
                         subtotal_f = 0
@@ -307,7 +341,7 @@ def add_summary_table_to_all_sheets():
                         for ag in range(len(age_groups)):
                             for sx in range(2):
                                 val = admitted_counts[ag][sx]
-                                ws.cell(row=start_row + admitted_row_idx, column=col_ptr, value=val)
+                                ws.cell(row=metrics_start_row + admitted_row_idx, column=col_ptr, value=val)
                                 if sx == 0:
                                     subtotal_m += val
                                 else:
@@ -315,9 +349,9 @@ def add_summary_table_to_all_sheets():
                                 total += val
                                 col_ptr += 1
                         # Subtotals and total
-                        ws.cell(row=start_row + admitted_row_idx, column=col_ptr, value=subtotal_m)
-                        ws.cell(row=start_row + admitted_row_idx, column=col_ptr+1, value=subtotal_f)
-                        ws.cell(row=start_row + admitted_row_idx, column=col_ptr+2, value=total)
+                        ws.cell(row=metrics_start_row + admitted_row_idx, column=col_ptr, value=subtotal_m)
+                        ws.cell(row=metrics_start_row + admitted_row_idx, column=col_ptr+1, value=subtotal_f)
+                        ws.cell(row=metrics_start_row + admitted_row_idx, column=col_ptr+2, value=total)
 
             # --- Fill Wasting, Stunting, Underweight, Overweight, Obese rows ---
             metric_names = {
@@ -327,12 +361,12 @@ def add_summary_table_to_all_sheets():
                 "d. Overweight": "Overweight",
                 "e. Obese": "Obese"
             }
-            # Find the row index in the summary table for each metric
+            # Find the 0-based index in the metrics list for each metric
             metric_row_indices = {}
             for i, metric in enumerate(metrics):
                 for k, v in metric_names.items():
                     if metric.strip().lower().startswith(k.lower()):
-                        metric_row_indices[v] = i + 1  # +1 because header is at row 1
+                        metric_row_indices[v] = i
 
             for sheet_name in sheet_names:
                 if sheet_name in wb.sheetnames:
@@ -365,6 +399,7 @@ def add_summary_table_to_all_sheets():
                     # Write counts to summary table
                     start_col = 31  # AE
                     start_row = 1
+                    metrics_start_row = start_row + 2
                     for metric_label, row_idx in metric_row_indices.items():
                         col_ptr = start_col + 1
                         subtotal_m = 0
@@ -373,23 +408,92 @@ def add_summary_table_to_all_sheets():
                         for ag in range(len(age_groups)):
                             for sx in range(2):
                                 val = metric_counts[metric_label][ag][sx]
-                                ws.cell(row=start_row + row_idx, column=col_ptr, value=val)
+                                ws.cell(row=metrics_start_row + row_idx, column=col_ptr, value=val)
                                 if sx == 0:
                                     subtotal_m += val
                                 else:
                                     subtotal_f += val
                                 total += val
                                 col_ptr += 1
-                        ws.cell(row=start_row + row_idx, column=col_ptr, value=subtotal_m)
-                        ws.cell(row=start_row + row_idx, column=col_ptr+1, value=subtotal_f)
-                        ws.cell(row=start_row + row_idx, column=col_ptr+2, value=total)
+                        ws.cell(row=metrics_start_row + row_idx, column=col_ptr, value=subtotal_m)
+                        ws.cell(row=metrics_start_row + row_idx, column=col_ptr+1, value=subtotal_f)
+                        ws.cell(row=metrics_start_row + row_idx, column=col_ptr+2, value=total)
+
+            # --- Fill Disease and other co-morbidities rows ---
+            # Find the 0-based index for the "f." line and the rows for each disease
+            disease_header_row = None
+            disease_row_indices = {}
+            for i, metric in enumerate(metrics):
+                metric_stripped = metric.strip()
+                if metric_stripped.lower().startswith('f. disease and other co-morbidities'):
+                    disease_header_row = i
+                else:
+                    for disease in DISEASE_OPTIONS:
+                        if metric_stripped.lower() == disease.strip().lower():
+                            disease_row_indices[disease] = i
+
+            if disease_row_indices:
+                for sheet_name in sheet_names:
+                    if sheet_name in wb.sheetnames:
+                        ws = wb[sheet_name]
+                        header_row = [cell.value for cell in ws[1]]
+                        try:
+                            age_col_idx = header_row.index('Age Group')
+                            sex_col_idx = header_row.index('Sex')
+                            disease_col_idx = header_row.index('Disease and other Co-morbidities')
+                        except ValueError:
+                            continue  # Skip if columns not found
+
+                        # Initialise counters per disease
+                        disease_counts = {
+                            disease: [[0, 0] for _ in age_groups]
+                            for disease in DISEASE_OPTIONS
+                        }
+
+                        for row in ws.iter_rows(min_row=2, values_only=True):
+                            age_val = row[age_col_idx]
+                            sex_val = str(row[sex_col_idx]).strip().lower() if row[sex_col_idx] else ''
+                            disease_val = str(row[disease_col_idx]).strip() if row[disease_col_idx] else ''
+                            try:
+                                age_tbl_idx = age_groups.index(age_val)
+                            except Exception:
+                                continue
+                            sex_tbl_idx = 0 if sex_val == 'male' else 1 if sex_val == 'female' else None
+                            if sex_tbl_idx is None:
+                                continue
+                            # Match disease value to one of the configured options
+                            for disease in DISEASE_OPTIONS:
+                                if disease_val.lower() == disease.strip().lower():
+                                    disease_counts[disease][age_tbl_idx][sex_tbl_idx] += 1
+                                    break
+
+                        # Write counts to the summary table
+                        start_col = 31  # AE
+                        start_row = 1
+                        metrics_start_row = start_row + 2
+                        for disease, row_idx in disease_row_indices.items():
+                            col_ptr = start_col + 1
+                            subtotal_m = subtotal_f = total = 0
+                            for ag in range(len(age_groups)):
+                                for sx in range(2):
+                                    val = disease_counts.get(disease, [[0, 0] for _ in age_groups])[ag][sx]
+                                    ws.cell(row=metrics_start_row + row_idx, column=col_ptr, value=val)
+                                    if sx == 0:
+                                        subtotal_m += val
+                                    else:
+                                        subtotal_f += val
+                                    total += val
+                                    col_ptr += 1
+                            ws.cell(row=metrics_start_row + row_idx, column=col_ptr, value=subtotal_m)
+                            ws.cell(row=metrics_start_row + row_idx, column=col_ptr+1, value=subtotal_f)
+                            ws.cell(row=metrics_start_row + row_idx, column=col_ptr+2, value=total)
 
                       # --- Fill "Number of nutritionally-at-risk (NAR) patients" row ---
-    # Find the row index in metrics for this label
+    # Find the 0-based index in metrics for this label
     nar_metric_row = None
     for i, metric in enumerate(metrics):
         if metric.strip().lower().startswith("number of nutritionally-at-risk"):
-            nar_metric_row = i + 1  # +1 for header
+            nar_metric_row = i
             break
 
     if nar_metric_row:
@@ -422,6 +526,7 @@ def add_summary_table_to_all_sheets():
                 # Write counts to summary table
                 start_col = 31  # AE
                 start_row = 1
+                metrics_start_row = start_row + 2
                 col_ptr = start_col + 1
                 subtotal_m = 0
                 subtotal_f = 0
@@ -429,16 +534,16 @@ def add_summary_table_to_all_sheets():
                 for ag in range(len(age_groups)):
                     for sx in range(2):
                         val = nar_counts[ag][sx]
-                        ws.cell(row=start_row + nar_metric_row, column=col_ptr, value=val)
+                        ws.cell(row=metrics_start_row + nar_metric_row, column=col_ptr, value=val)
                         if sx == 0:
                             subtotal_m += val
                         else:
                             subtotal_f += val
                         total += val
                         col_ptr += 1
-                ws.cell(row=start_row + nar_metric_row, column=col_ptr, value=subtotal_m)
-                ws.cell(row=start_row + nar_metric_row, column=col_ptr+1, value=subtotal_f)
-                ws.cell(row=start_row + nar_metric_row, column=col_ptr+2, value=total)
+                ws.cell(row=metrics_start_row + nar_metric_row, column=col_ptr, value=subtotal_m)
+                ws.cell(row=metrics_start_row + nar_metric_row, column=col_ptr+1, value=subtotal_f)
+                ws.cell(row=metrics_start_row + nar_metric_row, column=col_ptr+2, value=total)
 
 
 
@@ -447,12 +552,12 @@ def add_summary_table_to_all_sheets():
         "i. Moderate acute malnutrition": "Moderate Acute Malnutrition",
         "ii. Severe acute malnutrition": "Severe Acute Malnutrition"
     }
-    # Find row indices for these metrics
+    # Find 0-based row indices for these metrics
     mam_sam_row_indices = {}
     for i, metric in enumerate(metrics):
         for label in mam_sam_metrics:
             if metric.strip().lower().startswith(label.lower()):
-                mam_sam_row_indices[label] = i + 1  # +1 for header
+                mam_sam_row_indices[label] = i
 
     for sheet_name in sheet_names:
         if sheet_name in wb.sheetnames:
@@ -487,6 +592,7 @@ def add_summary_table_to_all_sheets():
             # Write counts to summary table
             start_col = 31  # AE
             start_row = 1
+            metrics_start_row = start_row + 2
             # Moderate acute malnutrition
             if "i. Moderate acute malnutrition" in mam_sam_row_indices:
                 row_idx = mam_sam_row_indices["i. Moderate acute malnutrition"]
@@ -495,16 +601,16 @@ def add_summary_table_to_all_sheets():
                 for ag in range(len(age_groups)):
                     for sx in range(2):
                         val = mam_counts[ag][sx]
-                        ws.cell(row=start_row + row_idx, column=col_ptr, value=val)
+                        ws.cell(row=metrics_start_row + row_idx, column=col_ptr, value=val)
                         if sx == 0:
                             subtotal_m += val
                         else:
                             subtotal_f += val
                         total += val
                         col_ptr += 1
-                ws.cell(row=start_row + row_idx, column=col_ptr, value=subtotal_m)
-                ws.cell(row=start_row + row_idx, column=col_ptr+1, value=subtotal_f)
-                ws.cell(row=start_row + row_idx, column=col_ptr+2, value=total)
+                ws.cell(row=metrics_start_row + row_idx, column=col_ptr, value=subtotal_m)
+                ws.cell(row=metrics_start_row + row_idx, column=col_ptr+1, value=subtotal_f)
+                ws.cell(row=metrics_start_row + row_idx, column=col_ptr+2, value=total)
             # Severe acute malnutrition
             if "ii. Severe acute malnutrition" in mam_sam_row_indices:
                 row_idx = mam_sam_row_indices["ii. Severe acute malnutrition"]
@@ -513,7 +619,7 @@ def add_summary_table_to_all_sheets():
                 for ag in range(len(age_groups)):
                     for sx in range(2):
                         val = sam_counts[ag][sx]
-                        ws.cell(row=start_row + row_idx, column=col_ptr, value=val)
+                        ws.cell(row=metrics_start_row + row_idx, column=col_ptr, value=val)
                         if sx == 0:
                             subtotal_m += val
                         else:
@@ -532,9 +638,9 @@ def add_summary_table_to_all_sheets():
     doc_row_idx = ncp_row_idx = None
     for i, metric in enumerate(metrics):
         if metric.strip().lower().startswith(doc_metric.lower()):
-            doc_row_idx = i + 1  # +1 for header
+            doc_row_idx = i
         if metric.strip().lower().startswith(ncp_metric.lower()):
-            ncp_row_idx = i + 1
+            ncp_row_idx = i
 
     for sheet_name in sheet_names:
         if sheet_name in wb.sheetnames:
@@ -571,6 +677,7 @@ def add_summary_table_to_all_sheets():
 
             start_col = 31  # AE
             start_row = 1
+            metrics_start_row = start_row + 2
 
             # Write documentation counts
             if doc_row_idx is not None:
@@ -579,16 +686,16 @@ def add_summary_table_to_all_sheets():
                 for ag in range(len(age_groups)):
                     for sx in range(2):
                         val = doc_counts[ag][sx]
-                        ws.cell(row=start_row + doc_row_idx, column=col_ptr, value=val)
+                        ws.cell(row=metrics_start_row + doc_row_idx, column=col_ptr, value=val)
                         if sx == 0:
                             subtotal_m += val
                         else:
                             subtotal_f += val
                         total += val
                         col_ptr += 1
-                ws.cell(row=start_row + doc_row_idx, column=col_ptr, value=subtotal_m)
-                ws.cell(row=start_row + doc_row_idx, column=col_ptr+1, value=subtotal_f)
-                ws.cell(row=start_row + doc_row_idx, column=col_ptr+2, value=total)
+                ws.cell(row=metrics_start_row + doc_row_idx, column=col_ptr, value=subtotal_m)
+                ws.cell(row=metrics_start_row + doc_row_idx, column=col_ptr+1, value=subtotal_f)
+                ws.cell(row=metrics_start_row + doc_row_idx, column=col_ptr+2, value=total)
 
             # Write NCP counts
             if ncp_row_idx is not None:
@@ -597,16 +704,16 @@ def add_summary_table_to_all_sheets():
                 for ag in range(len(age_groups)):
                     for sx in range(2):
                         val = ncp_counts[ag][sx]
-                        ws.cell(row=start_row + ncp_row_idx, column=col_ptr, value=val)
+                        ws.cell(row=metrics_start_row + ncp_row_idx, column=col_ptr, value=val)
                         if sx == 0:
                             subtotal_m += val
                         else:
                             subtotal_f += val
                         total += val
                         col_ptr += 1
-                ws.cell(row=start_row + ncp_row_idx, column=col_ptr, value=subtotal_m)
-                ws.cell(row=start_row + ncp_row_idx, column=col_ptr+1, value=subtotal_f)
-                ws.cell(row=start_row + ncp_row_idx, column=col_ptr+2, value=total)
+                ws.cell(row=metrics_start_row + ncp_row_idx, column=col_ptr, value=subtotal_m)
+                ws.cell(row=metrics_start_row + ncp_row_idx, column=col_ptr+1, value=subtotal_f)
+                ws.cell(row=metrics_start_row + ncp_row_idx, column=col_ptr+2, value=total)
 
     # # --- Lock summary table cells and protect the sheet ---
     # for sheet_name in sheet_names:

@@ -113,7 +113,7 @@ def init_db():
           `Bowel Movement` VARCHAR(64) NULL,
           `Emesis` VARCHAR(32) NULL,
           `Abdominal Distention` VARCHAR(32) NULL,
-          `Biochemical Parameters` VARCHAR(128) NULL,
+          `Disease and other Co-morbidities` VARCHAR(128) NULL,
           `RND Dietary Management` VARCHAR(128) NULL,
           `Diet Prescriptions(Current)` VARCHAR(512) NULL,
           `With Documents` ENUM('Yes','No') NULL,

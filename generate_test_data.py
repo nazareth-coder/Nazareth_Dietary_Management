@@ -200,7 +200,7 @@ def generate_patient(patient_id):
     ]
     
     # Format the SQL INSERT statement
-    sql = f"""INSERT INTO `patients` (`Patient ID`, `Patient Name`, `Sex`, `Age`, `Age Group`, `Ward Admission Date`, `Date of Visit`, `Diagnosis`, `With Nutrition Support`, `Ward`, `Subspecialty`, `Height`, `Weight`, `Type Of Visit`, `Purpose of Visit`, `WFL Z-Score`, `BMI Percentile`, `Nutritional Status`, `Bowel Movement`, `Emesis`, `Abdominal Distention`, `Biochemical Parameters`, `RND Dietary Management`, `Diet Prescriptions(Current)`, `With Documents`, `Given NCP`, `Encoded By`, `Encoded Date`, `Last Updated`) VALUES ({', '.join(sql_value(v) for v in values)});"""
+    sql = f"""INSERT INTO `patients` (`Patient ID`, `Patient Name`, `Sex`, `Age`, `Age Group`, `Ward Admission Date`, `Date of Visit`, `Diagnosis`, `With Nutrition Support`, `Ward`, `Subspecialty`, `Height`, `Weight`, `Type Of Visit`, `Purpose of Visit`, `WFL Z-Score`, `BMI Percentile`, `Nutritional Status`, `Bowel Movement`, `Emesis`, `Abdominal Distention`, `Disease and other Co-morbidities`, `RND Dietary Management`, `Diet Prescriptions(Current)`, `With Documents`, `Given NCP`, `Encoded By`, `Encoded Date`, `Last Updated`) VALUES ({', '.join(sql_value(v) for v in values)});"""
     
     return sql
 
